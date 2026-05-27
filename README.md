@@ -39,6 +39,7 @@ Starting a new training will automatically reset all existing checkpoints, logs,
 # 5. Citation
 
 If you use this work in an academic work, please cite:
+```
 @inproceedings{Tran2026HybridTD3,
     author    = {Thanh-Tuan Tran and Thanh Nguyen Canh and Van Xiem Hoang and Nak Young Chong},
     title     = {Hybrid TD3: Overestimation Bias Analysis and Stable Policy Optimization for Hybrid Action Space},
