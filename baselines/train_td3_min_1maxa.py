@@ -1,3 +1,5 @@
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repository root
 import numpy as np
 from moviepy.editor import ImageSequenceClip
 from datetime import datetime
@@ -9,7 +11,7 @@ import shutil
 import os
 import time
 from utils.relay_buffer import ReplayBuffer
-from models.our_td3_min_1a import Agent
+from models.our_td3_min_1maxa import Agent
 from utils.normalizer import RunningStatNormalizer
 import warnings
 warnings.filterwarnings("ignore")
@@ -27,21 +29,6 @@ def eval_policy(policy, env, normalizer, eval_episodes=10, video=None, save=Fals
             state, reward, done, info = env.step(action)
             # avg_reward += reward
         success_rate += any(info["log"])
-        is_success = any(info["log"])
-        if is_success and save:
-            print("...video saving...")
-            debug_clip = ImageSequenceClip(env.cache_front_video, fps=15)
-            video_path = os.path.join(video, f"demo_ep{i}_view_0_action_{env.unwrapped.action_type}_{timestamp}_state_{is_success}.mp4")
-            debug_clip.write_videofile(video_path, fps=15)
-
-            debug_clip = ImageSequenceClip(env.cache_side_video, fps=15)
-            video_path = os.path.join(video, f"demo_ep{i}_view_1_action_{env.unwrapped.action_type}_{timestamp}_state_{is_success}.mp4")
-            debug_clip.write_videofile(video_path, fps=15)
-
-            debug_clip = ImageSequenceClip(env.cache_diagonal_video, fps=15)
-            video_path = os.path.join(video, f"demo_ep{i}_view_2_action_{env.unwrapped.action_type}_{timestamp}_state_{is_success}.mp4")
-            debug_clip.write_videofile(video_path, fps=15)
-            print(f"Video saved to {video_path}")
 
     success_rate /= eval_episodes
 
@@ -50,16 +37,15 @@ def eval_policy(policy, env, normalizer, eval_episodes=10, video=None, save=Fals
     print("---------------------------------------")
 
     return success_rate
-
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--policy_name", default="td3_min_1a")  # Policy name
+    parser.add_argument("--policy_name", default="td3_min_1maxa")  # Policy name
     parser.add_argument("--env_name", default="ImitationLearning-v1")  # environment name
     parser.add_argument("--warmup", default=20000, type=int)  # How many time steps purely random policy is run for (20000 for all actions)
     parser.add_argument("--action", default=0, type=int, required=True)  # training action
-    parser.add_argument("--render", default=False, type=bool, required=True)  # training action
-    parser.add_argument("--eval", default=False, type=bool, required=True)  # training action
+    parser.add_argument("--render", action="store_true")  # unused, kept for compatibility
+    parser.add_argument("--eval", action="store_true")  # unused, kept for compatibility
     parser.add_argument("--seed", default=42, type=int)
     parser.add_argument("--log_path", default='reward_log', type=str)  # reward log path
     parser.add_argument("--checkpoint", default='ckpt', type=str)  # checkpoint log path

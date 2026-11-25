@@ -1,30 +1,35 @@
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repository root
 import numpy as np
-from datetime import datetime
 import gym
 import env
 from moviepy.editor import ImageSequenceClip
+from datetime import datetime
 import argparse
 from torch.utils.tensorboard import SummaryWriter
 import shutil
 import os
 import time
 from utils.relay_buffer import ReplayBuffer
-from related_works.ts_mp_dqn import Agent
+from models.our_td3_maxmin_2a_prob import Agent
 from utils.normalizer import RunningStatNormalizer
 import warnings
 warnings.filterwarnings("ignore")
 
-def eval_policy(policy, env, eval_episodes=10, video=None, save=False):
+def eval_policy(policy, env, normalizer, eval_episodes=10, video=None, save=False):
     current_datetime = datetime.now()
     timestamp = current_datetime.strftime("%Y%m%d_%H%M%S")
     success_rate = 0
     for i in range(eval_episodes):
         state, done = env.reset(), False
         while not done:
-            action = policy.choose_action(state, validation=True)
+            normalized_state = state.copy()
+            normalized_state[:12] = normalizer.normalize(state[:12])
+            action = policy.choose_action(normalized_state, validation=True)
             state, reward, done, info = env.step(action)
             # avg_reward += reward
         success_rate += any(info["log"])
+
     success_rate /= eval_episodes
 
     print("---------------------------------------")
@@ -36,10 +41,12 @@ def eval_policy(policy, env, eval_episodes=10, video=None, save=False):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--policy_name", default="tsmpdqn")  # Policy name
+    parser.add_argument("--policy_name", default="td3_maxmin_2a_prob")  # Policy name
     parser.add_argument("--env_name", default="ImitationLearning-v1")  # environment name
-    parser.add_argument("--warmup", default=20000, type=int)  # purely random action
+    parser.add_argument("--warmup", default=20000, type=int)  # How many time steps purely random policy is run for (20000 for all actions)
     parser.add_argument("--action", default=0, type=int, required=True)  # training action
+    parser.add_argument("--render", action="store_true")  # unused, kept for compatibility
+    parser.add_argument("--eval", action="store_true")  # unused, kept for compatibility
     parser.add_argument("--seed", default=42, type=int)
     parser.add_argument("--log_path", default='reward_log', type=str)  # reward log path
     parser.add_argument("--checkpoint", default='ckpt', type=str)  # checkpoint log path
@@ -73,17 +80,19 @@ if __name__ == "__main__":
     env = gym.make(args.env_name)
     env.unwrapped.max_steps = args.max_steps  # define max steps
     env.unwrapped.max_episode = args.max_episode  # define max steps
+    normalizer = RunningStatNormalizer(shape=(12,))
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
     max_action = float(env.action_space.high[0])
     discrete_action = env.discrete_action.n
+
     # Initialize policy
-    policy = Agent(state_dim=state_dim, action_dim=action_dim, p_action_dim=discrete_action, max_action=max_action, warmup=args.warmup, lr=1e-4,
-                   writer=writer, discount=args.discount, tau=args.tau, policy_noise=args.policy_noise,
-                   noise_clip=args.noise_clip, policy_freq=args.policy_freq, chkpt_dir=os.path.join(base, args.checkpoint))
+    policy = Agent(state_dim=state_dim, action_dim=action_dim, p_action_dim=discrete_action, max_action=max_action,
+                   warmup=args.warmup, writer=writer, discount=args.discount, tau=args.tau, policy_noise=args.policy_noise,
+                   noise_clip=args.noise_clip, policy_freq=args.policy_freq, normalizer=normalizer, chkpt_dir=os.path.join(base, args.checkpoint))
     replay_buffer = ReplayBuffer()
 
-    max_episode_avg_reward = best_reward = float('-inf')
+    max_episode_avg_reward = best_reward = max_episode_reward = float('-inf')
     env.unwrapped.action_type = args.action
     env.unwrapped.writer = writer
     reward_history = []
@@ -99,9 +108,13 @@ if __name__ == "__main__":
         n_steps = 0
         state = env.reset()
         done = False
+        normalizer.update(state[:12])
 
         while not done:
-            action = policy.choose_action(state)
+            normalized_state = state.copy()
+            normalized_state[:12] = normalizer.normalize(state[:12])
+            # Use policy with exploration noise
+            action = policy.choose_action(normalized_state, noise_scale=args.expl_noise)
             if replay_buffer.ready(batch_size=args.batch_size):
                 policy.learn(replay_buffer, args.batch_size)
 
@@ -109,6 +122,7 @@ if __name__ == "__main__":
             total_reward += reward  # total step reward
             replay_buffer.add((state, next_state, action, reward, done))
 
+            normalizer.update(next_state[:12])
             state = next_state
             n_steps += 1
             elapsed = int(time.time() - t0)
@@ -124,9 +138,9 @@ if __name__ == "__main__":
         if best_reward <= total_reward/n_steps and success[-1]:
             best_reward = total_reward/n_steps
             policy.save()
-            # env.unwrapped.virtualize = True
-            # env.unwrapped.eval = True
-            success_rate = eval_policy(policy, env, eval_episodes=10, video=args.video, save=env.unwrapped.virtualize)
+            env.unwrapped.virtualize = False
+            env.unwrapped.eval = False
+            success_rate = eval_policy(policy, env, normalizer, eval_episodes=15, video=args.video, save=env.unwrapped.virtualize)
             writer.add_scalar("Eval/success rate", success_rate, curr_episode)
 
         env.unwrapped.virtualize = False

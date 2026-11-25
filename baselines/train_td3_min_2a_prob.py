@@ -1,15 +1,17 @@
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repository root
 import numpy as np
-from datetime import datetime
 import gym
 import env
 from moviepy.editor import ImageSequenceClip
+from datetime import datetime
 import argparse
 from torch.utils.tensorboard import SummaryWriter
 import shutil
 import os
 import time
 from utils.relay_buffer import ReplayBuffer
-from models.darc import Agent
+from models.our_td3_min_2a_prob import Agent
 from utils.normalizer import RunningStatNormalizer
 import warnings
 warnings.filterwarnings("ignore")
@@ -21,10 +23,27 @@ def eval_policy(policy, env, normalizer, eval_episodes=10, video=None, save=Fals
     for i in range(eval_episodes):
         state, done = env.reset(), False
         while not done:
-            action = policy.choose_action(state, validation=True)
+            normalized_state = state.copy()
+            normalized_state[:12] = normalizer.normalize(state[:12])
+            action = policy.choose_action(normalized_state, validation=True)
             state, reward, done, info = env.step(action)
             # avg_reward += reward
         success_rate += any(info["log"])
+        is_success = any(info["log"])
+        if is_success and save:
+            print("...video saving...")
+            debug_clip = ImageSequenceClip(env.cache_front_video, fps=15)
+            video_path = os.path.join(video, f"demo_ep{i}_view_0_action_{env.unwrapped.action_type}_{timestamp}_state_{is_success}.mp4")
+            debug_clip.write_videofile(video_path, fps=15)
+
+            debug_clip = ImageSequenceClip(env.cache_side_video, fps=15)
+            video_path = os.path.join(video, f"demo_ep{i}_view_1_action_{env.unwrapped.action_type}_{timestamp}_state_{is_success}.mp4")
+            debug_clip.write_videofile(video_path, fps=15)
+
+            debug_clip = ImageSequenceClip(env.cache_diagonal_video, fps=15)
+            video_path = os.path.join(video, f"demo_ep{i}_view_2_action_{env.unwrapped.action_type}_{timestamp}_state_{is_success}.mp4")
+            debug_clip.write_videofile(video_path, fps=15)
+            print(f"Video saved to {video_path}")
 
     success_rate /= eval_episodes
 
@@ -37,13 +56,16 @@ def eval_policy(policy, env, normalizer, eval_episodes=10, video=None, save=Fals
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--policy_name", default="darc")  # Policy name
+    parser.add_argument("--policy_name", default="td3_min_2a_prob")  # Policy name
     parser.add_argument("--env_name", default="ImitationLearning-v1")  # environment name
-    parser.add_argument("--warmup", default=20000, type=int)  # purely random action
+    parser.add_argument("--warmup", default=20000, type=int)  # How many time steps purely random policy is run for (20000 for all actions)
     parser.add_argument("--action", default=0, type=int, required=True)  # training action
+    parser.add_argument("--render", action="store_true")  # unused, kept for compatibility
+    parser.add_argument("--eval", action="store_true")  # unused, kept for compatibility
     parser.add_argument("--seed", default=42, type=int)
     parser.add_argument("--log_path", default='reward_log', type=str)  # reward log path
     parser.add_argument("--checkpoint", default='ckpt', type=str)  # checkpoint log path
+    parser.add_argument("--video", default='demo', type=str)  # demo path
     parser.add_argument("--max_episode", default=1e6, type=int)  # Max episode to run environment for
     parser.add_argument("--eval_freq", default=5e3, type=int)  # Evaluate frequency
     parser.add_argument("--expl_noise", default=0.2, type=float)  # Gaussian exploration noise
@@ -53,8 +75,6 @@ if __name__ == "__main__":
     parser.add_argument("--tau", default=0.005, type=float)  # Target network update rate
     parser.add_argument("--policy_noise", default=0.2, type=float)  # Noise added to target policy during critic update
     parser.add_argument("--noise_clip", default=0.5, type=float)  # Range to clip target policy noise
-    parser.add_argument("--q_weight", default=0.2, type=float)  # Range to clip target policy noise
-    parser.add_argument("--reg", default=0.005, type=float)  # Range to clip target policy noise
     parser.add_argument("--policy_freq", default=2, type=int)  # Frequency of delayed policy updates
     args = parser.parse_args()
 
@@ -65,7 +85,7 @@ if __name__ == "__main__":
 
     # Initialize saving file
     base = f'{args.policy_name}_{str(args.action)}'
-    for path in [args.log_path]:
+    for path in [args.log_path, args.video]:
         path = os.path.join(base, path)
         if os.path.isdir(path):
             shutil.rmtree(path)
@@ -82,13 +102,12 @@ if __name__ == "__main__":
     discrete_action = env.discrete_action.n
 
     # Initialize policy
-    policy = Agent(state_dim=state_dim, action_dim=action_dim, max_action=max_action, p_action_dim=discrete_action,
-                   warmup=args.warmup, lr=1e-4, writer=writer, discount=args.discount, tau=args.tau,
-                   policy_noise=args.policy_noise, noise_clip=args.noise_clip, normalizer=normalizer,
-                   chkpt_dir=os.path.join(base, args.checkpoint), q_weight=args.reg, regularization_weight=args.reg)
+    policy = Agent(state_dim=state_dim, action_dim=action_dim, p_action_dim=discrete_action, max_action=max_action,
+                   warmup=args.warmup, writer=writer, discount=args.discount, tau=args.tau, policy_noise=args.policy_noise,
+                   noise_clip=args.noise_clip, policy_freq=args.policy_freq, normalizer=normalizer, chkpt_dir=os.path.join(base, args.checkpoint))
     replay_buffer = ReplayBuffer()
 
-    max_episode_avg_reward = best_reward = float('-inf')
+    max_episode_avg_reward = best_reward = max_episode_reward = float('-inf')
     env.unwrapped.action_type = args.action
     env.unwrapped.writer = writer
     reward_history = []
@@ -104,10 +123,13 @@ if __name__ == "__main__":
         n_steps = 0
         state = env.reset()
         done = False
+        normalizer.update(state[:12])
 
         while not done:
+            normalized_state = state.copy()
+            normalized_state[:12] = normalizer.normalize(state[:12])
             # Use policy with exploration noise
-            action = policy.choose_action(state, noise_scale=args.expl_noise)
+            action = policy.choose_action(normalized_state, noise_scale=args.expl_noise)
             if replay_buffer.ready(batch_size=args.batch_size):
                 policy.learn(replay_buffer, args.batch_size)
 
@@ -115,6 +137,7 @@ if __name__ == "__main__":
             total_reward += reward  # total step reward
             replay_buffer.add((state, next_state, action, reward, done))
 
+            normalizer.update(next_state[:12])
             state = next_state
             n_steps += 1
             elapsed = int(time.time() - t0)
@@ -126,15 +149,14 @@ if __name__ == "__main__":
         reward_history.append(total_reward)
         avg_reward_history.append(total_reward / n_steps)
         success.append(any(info['log']))
-        max_episode_avg_reward = max(total_reward/n_steps, max_episode_avg_reward)
 
         if best_reward <= total_reward/n_steps and success[-1]:
             best_reward = total_reward/n_steps
             policy.save()
-            # env.unwrapped.virtualize = True
-            # env.unwrapped.eval = True
-            # success_rate = eval_policy(policy, env, normalizer, eval_episodes=10, video=args.video, save=env.unwrapped.virtualize)
-            # writer.add_scalar("Eval/success rate", success_rate, curr_episode)
+            env.unwrapped.virtualize = False
+            env.unwrapped.eval = False
+            success_rate = eval_policy(policy, env, normalizer, eval_episodes=15, video=args.video, save=env.unwrapped.virtualize)
+            writer.add_scalar("Eval/success rate", success_rate, curr_episode)
 
         env.unwrapped.virtualize = False
         env.unwrapped.eval = False

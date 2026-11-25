@@ -1,15 +1,17 @@
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repository root
 import numpy as np
+from moviepy.editor import ImageSequenceClip
 from datetime import datetime
 import gym
 import env
-from moviepy.editor import ImageSequenceClip
 import argparse
 from torch.utils.tensorboard import SummaryWriter
 import shutil
 import os
 import time
 from utils.relay_buffer import ReplayBuffer
-from models.td3 import Agent
+from models.our_td3_min_1a import Agent
 from utils.normalizer import RunningStatNormalizer
 import warnings
 warnings.filterwarnings("ignore")
@@ -54,10 +56,12 @@ def eval_policy(policy, env, normalizer, eval_episodes=10, video=None, save=Fals
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--policy_name", default="td3")  # Policy name
+    parser.add_argument("--policy_name", default="td3_min_1a")  # Policy name
     parser.add_argument("--env_name", default="ImitationLearning-v1")  # environment name
-    parser.add_argument("--warmup", default=20000, type=int)  # purely random action
+    parser.add_argument("--warmup", default=20000, type=int)  # How many time steps purely random policy is run for (20000 for all actions)
     parser.add_argument("--action", default=0, type=int, required=True)  # training action
+    parser.add_argument("--render", action="store_true")  # unused, kept for compatibility
+    parser.add_argument("--eval", action="store_true")  # unused, kept for compatibility
     parser.add_argument("--seed", default=42, type=int)
     parser.add_argument("--log_path", default='reward_log', type=str)  # reward log path
     parser.add_argument("--checkpoint", default='ckpt', type=str)  # checkpoint log path
@@ -81,7 +85,7 @@ if __name__ == "__main__":
 
     # Initialize saving file
     base = f'{args.policy_name}_{str(args.action)}'
-    for path in [args.log_path, args.video]:
+    for path in [args.log_path]:
         path = os.path.join(base, path)
         if os.path.isdir(path):
             shutil.rmtree(path)
@@ -95,14 +99,15 @@ if __name__ == "__main__":
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
     max_action = float(env.action_space.high[0])
+    discrete_action = env.discrete_action.n
 
     # Initialize policy
-    policy = Agent(state_dim=state_dim, action_dim=action_dim, max_action=max_action, warmup=args.warmup, lr=1e-4,
-                   writer=writer, discount=args.discount, tau=args.tau, policy_noise=args.policy_noise,
+    policy = Agent(state_dim=state_dim, action_dim=action_dim, p_action_dim=discrete_action, max_action=max_action,
+                   warmup=args.warmup, writer=writer, discount=args.discount, tau=args.tau, policy_noise=args.policy_noise,
                    noise_clip=args.noise_clip, policy_freq=args.policy_freq, normalizer=normalizer, chkpt_dir=os.path.join(base, args.checkpoint))
     replay_buffer = ReplayBuffer()
 
-    max_episode_avg_reward = best_reward = float('-inf')
+    best_reward = float('-inf')
     env.unwrapped.action_type = args.action
     env.unwrapped.writer = writer
     reward_history = []
@@ -144,14 +149,13 @@ if __name__ == "__main__":
         reward_history.append(total_reward)
         avg_reward_history.append(total_reward / n_steps)
         success.append(any(info['log']))
-        max_episode_avg_reward = max(total_reward/n_steps, max_episode_avg_reward)
 
         if best_reward <= total_reward/n_steps and success[-1]:
             best_reward = total_reward/n_steps
             policy.save()
-            # env.unwrapped.virtualize = True
-            # env.unwrapped.eval = True
-            success_rate = eval_policy(policy, env, normalizer, eval_episodes=10, video=args.video, save=env.unwrapped.virtualize)
+            env.unwrapped.virtualize = False
+            env.unwrapped.eval = False
+            success_rate = eval_policy(policy, env, normalizer, eval_episodes=15, video=args.video, save=env.unwrapped.virtualize)
             writer.add_scalar("Eval/success rate", success_rate, curr_episode)
 
         env.unwrapped.virtualize = False
@@ -164,7 +168,6 @@ if __name__ == "__main__":
             writer.add_scalar("Reward/moving_avg_of_avg_reward", moving_avg_avg, curr_episode)
         writer.add_scalar('Reward/avg_total_reward_per_episode', total_reward/n_steps, curr_episode)
         writer.add_scalar('Reward/episode reward', episode_reward, curr_episode)
-        # writer.add_scalar('Reward/episode_return', max_episode_avg_reward, curr_episode)
         writer.add_scalar(f"Reward/success rate", sum(success[-100:]) / 100, curr_episode)
         elapsed = int(time.time() - t0)
         print('------------------------------------------------------')

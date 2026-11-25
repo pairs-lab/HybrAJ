@@ -1,36 +1,55 @@
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repository root
 import numpy as np
 from datetime import datetime
-import env
 import gym
+import env
 import argparse
 from torch.utils.tensorboard import SummaryWriter
 import shutil
 import os
 import time
-import random
-from models.ppo import Agent
+from utils.relay_buffer import ReplayBuffer
+from models.sac import Agent
 import warnings
 warnings.filterwarnings("ignore")
+
+def eval_policy(policy, env, eval_episodes=15):
+    success_rate = 0
+    for _ in range(eval_episodes):
+        state, done = env.reset(), False
+        while not done:
+            action = policy.choose_action(np.array(state), evaluate=True)
+            state, reward, done, info = env.step(action)
+            # avg_reward += reward
+        success_rate += any(info["log"])
+
+    success_rate /= eval_episodes
+
+    print("---------------------------------------")
+    print(f"Evaluation over {eval_episodes} episodes: {success_rate:.3f}")
+    print("---------------------------------------")
+    return success_rate
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--policy_name", default="ppo")  # Policy name
+    parser.add_argument("--policy_name", default="sac")  # Policy name
     parser.add_argument("--env_name", default="ImitationLearning-v1")  # environment name
     parser.add_argument("--action", default=0, type=int, required=True)  # training action
     parser.add_argument("--seed", default=42, type=int)
     parser.add_argument("--log_path", default='reward_log', type=str)  # reward log path
-    parser.add_argument("--checkpoint", default='ckpt', type=str)  # checkpoint log path
+    parser.add_argument("--checkpoint", default='ckpt', type=str)  # reward log path
     parser.add_argument("--max_episode", default=1e5, type=float)  # Max episode to run environment for
-    parser.add_argument("--batch_size", default=128, type=int)  # Batch size for both actor and critic (recommend 128)
-    parser.add_argument("--n_epochs", default=2, type=int)
-    parser.add_argument('--gamma', type=float, default=0.99, help='Discounted Factor')
-    parser.add_argument('--lambd', type=float, default=0.95, help='GAE Factor')
-    parser.add_argument('--policy_clip', type=float, default=0.2, help='PPO Clip rate')
-    parser.add_argument('--lr', type=float, default=2e-4, help='Learning rate of actor')
+    parser.add_argument("--eval_freq", default=5e3, type=int)  # Evaluate frequency
+    parser.add_argument("--save_models", action="store_true")  # Whether or not models are saved
+    parser.add_argument("--batch_size", default=256, type=int)  # Batch size for both actor and critic (recommend 128)
+    parser.add_argument("--discount", default=0.99, type=float)  # Discount factor
+    parser.add_argument("--max_steps", default=100, type=int)  # max steps per eposide
+    parser.add_argument("--tau", default=0.005, type=float)  # Target network update rate
     args = parser.parse_args()
 
-    file_name = "%s_%s_%s" % (args.policy_name, args.env_name, str(args.seed))
+    file_name = "%s_%s" % (args.policy_name, args.env_name)
     print("---------------------------------------")
     print("Settings: %s" % (file_name))
     print("---------------------------------------")
@@ -45,56 +64,63 @@ if __name__ == "__main__":
 
     writer = SummaryWriter(os.path.join(base, args.log_path))
     env = gym.make(args.env_name)
-    env.unwrapped.max_steps = args.batch_size  # define max steps
-    best_reward = float('-inf')
-    state_dim = env.observation_space.shape[0]  # 535
-    action_dim = env.action_space.shape[0]  # 7 joints
+    env.unwrapped.max_steps = args.max_steps  # define max steps
+    state_dim = env.observation_space.shape[0]
+    action_dim = env.action_space.shape[0]
     max_action = float(env.action_space.high[0])
     discrete_action = env.discrete_action.n
 
     # Initialize policy
-    policy = Agent(action_dims=action_dim, input_dims=state_dim, p_action_dim=discrete_action, gamma=args.gamma,
-                   alpha=args.lr, gae_lambda=args.lambd, policy_clip=args.policy_clip, batch_size=int(args.batch_size/2),
-                   n_epochs=args.n_epochs, chkpt=os.path.join(base, args.checkpoint))
+    policy = Agent(input_dim=state_dim, action_space=env.action_space, p_action_dim=discrete_action, alpha=0.08, writer=writer,
+                 discount=args.discount, tau=args.tau, chkpt_dir=os.path.join(base, args.checkpoint))
+    replay_buffer = ReplayBuffer()
+
     curr_episode = 0
+    best_reward = float('-inf')
+    updates_per_step = 4
     env.unwrapped.action_type = args.action
     env.unwrapped.writer = writer
     env.unwrapped.curriculum_learning = 50000
     episode_reward = 0
+    success = []
     reward_history = []
     avg_reward_history = []
-    success = []
     t0 = time.time()
-
+    '''TRAINING PROCESS'''
     while curr_episode < args.max_episode:
         total_reward = 0
         n_steps = 0
         state = env.reset()
         done = False
 
-        for _ in range(args.batch_size):
-            action, logprob, value, logp_c, logp_d = policy.choose_action(state)
-            next_state, reward, done, info = env.step([action[:-1], [action[-1]]])
+        while not done:
+            # Use policy with exploration noise
+            action = policy.choose_action(state)
+            if replay_buffer.ready(batch_size=args.batch_size):
+                for i in range(updates_per_step):
+                    policy.learn(replay_buffer, args.batch_size)
+
+            next_state, reward, done, info = env.step(action)
             total_reward += reward
-            policy.add(state, action, logp_c, logp_d, value, reward, done)  # store V at rollout time instead of re-compute V in the future
+            replay_buffer.add((state, next_state, action, reward, done))
             state = next_state
+            n_steps += 1
+
             elapsed = int(time.time() - t0)
             print('------------------------------------------------------')
             print(f"Episode: {curr_episode} Step: {n_steps} "
                   f"Reward: {reward:.5f}  --  Wallclk T: {elapsed // 86400}d {(elapsed % 86400) // 3600}h {(elapsed % 3600) // 60}m {elapsed % 60}s")
             print('------------------------------------------------------')
-            if done and n_steps < args.batch_size-1:
-                state = env.reset()
-            n_steps += 1
 
         reward_history.append(total_reward)
         avg_reward_history.append(total_reward / n_steps)
-        policy.learn()
         success.append(any(info['log']))
 
-        if best_reward <= total_reward / n_steps and success[-1]:
-            best_reward = total_reward / n_steps
-            policy.save_models()
+        if best_reward <= total_reward/n_steps and success[-1]:
+            best_reward = total_reward/n_steps
+            policy.save()
+            success_rate = eval_policy(policy, env)
+            writer.add_scalar("Eval/success rate", success_rate, curr_episode)
 
         episode_reward += total_reward
         if len(reward_history) >= 100:
@@ -105,7 +131,9 @@ if __name__ == "__main__":
         writer.add_scalar('Reward/avg_total_reward_per_episode', total_reward/n_steps, curr_episode)
         writer.add_scalar('Reward/episode reward', episode_reward, curr_episode)
         writer.add_scalar(f"Reward/success rate", sum(success[-100:]) / 100, curr_episode)
+        elapsed = int(time.time() - t0)
         print('------------------------------------------------------')
-        print(f"Episode: {curr_episode} Total reward: {total_reward:.5f}  --  Wallclk T: {int(time.time() - t0)} sec")
+        print(
+            f"Episode: {curr_episode} Total reward: {total_reward:.5f}  --  Wallclk T: {elapsed // 86400}d {(elapsed % 86400) // 3600}h {(elapsed % 3600) // 60}m {elapsed % 60}s")
         print('------------------------------------------------------')
         curr_episode += 1
