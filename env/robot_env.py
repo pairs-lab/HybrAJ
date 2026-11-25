@@ -10,6 +10,7 @@ from utils.random_env import random_env
 from config import *
 from utils.utils import Utils
 from utils import camera
+from utils.paths import ASSETS, asset
 
 
 # @markdown **Gym-style environment class:** this initializes a robot overlooking a workspace with objects.
@@ -20,8 +21,7 @@ class ImitationLearning(gym.Env):
         pybullet.connect(pybullet.DIRECT)  # pybullet.GUI for local GUI.
         pybullet.configureDebugVisualizer(pybullet.COV_ENABLE_GUI, 0)
         pybullet.setPhysicsEngineParameter(enableFileCaching=0)
-        assets_path = os.path.dirname(os.path.abspath(""))
-        pybullet.setAdditionalSearchPath(assets_path)
+        pybullet.setAdditionalSearchPath(ASSETS)
         pybullet.setAdditionalSearchPath(pybullet_data.getDataPath())
         pybullet.setPhysicsEngineParameter(numSolverIterations=100)  # physic engine step per time step
         pybullet.setPhysicsEngineParameter(contactERP=0.9, solverResidualThreshold=0)
@@ -51,8 +51,12 @@ class ImitationLearning(gym.Env):
             BOUNDS[1][-1] - BOUNDS[1][0],
             BOUNDS[2][-1] - BOUNDS[2][0]
         ])
-        self._read_specs_from_config(os.path.abspath(
-            os.path.join(self.utils.find_project_root("HybrAJ"), f'../asset/params/{self.robot}_suction.xml')))
+        self._load_robot_specs()
+
+    def _load_robot_specs(self):
+        """Joint bounds and noise of the selected robot, from assets/params/<robot>_suction.xml."""
+        self._read_specs_from_config(asset(f'params/{self.robot}_suction.xml'))
+        self.specs_robot = self.robot
 
     def seed(self, seed):
         print('set seed')
@@ -69,12 +73,14 @@ class ImitationLearning(gym.Env):
         pybullet.configureDebugVisualizer(pybullet.COV_ENABLE_RENDERING, 0)
 
         # Add robot.
+        if self.specs_robot != self.robot:  # robot chosen after construction (train script --robot)
+            self._load_robot_specs()
         self.plane = pybullet.loadURDF("plane.urdf", [0, 0, -0.001])
         self.robot_id = pybullet.loadURDF(
-            os.path.abspath(os.path.join(self.utils.find_project_root("HybrAJ"), f"../asset/{self.robot}/{self.robot}.urdf"))
+            asset(f'{self.robot}/{self.robot}.urdf')
             , [0, 0, 0], useFixedBase=True, flags=pybullet.URDF_USE_MATERIAL_COLORS_FROM_MTL)
         self.ghost_id = pybullet.loadURDF(
-            os.path.abspath(os.path.join(self.utils.find_project_root("HybrAJ"), f"../asset/{self.robot}/{self.robot}.urdf"))
+            asset(f'{self.robot}/{self.robot}.urdf')
             , [0, 0, -10])  # For forward kinematics.
         self.joint_ids = [pybullet.getJointInfo(self.robot_id, i) for i in range(pybullet.getNumJoints(self.robot_id))]
         self.joint_ids = [j[0] for j in self.joint_ids if j[2] == pybullet.JOINT_REVOLUTE]
@@ -122,9 +128,7 @@ class ImitationLearning(gym.Env):
                                                          basePosition=object_position)
                 else:
                     object_position[2] = 0
-                    object_id = pybullet.loadURDF(os.path.abspath(
-                        os.path.join(self.utils.find_project_root("HybrAJ"),
-                                     f"../asset/{object_type}/{object_type}.urdf")), object_position,
+                    object_id = pybullet.loadURDF(asset(f'{object_type}/{object_type}.urdf'), object_position,
                                                   useFixedBase=1 if 'bowl' in object_type else 0)
                 pybullet.changeDynamics(object_id, -1,
                                         lateralFriction=1.0,

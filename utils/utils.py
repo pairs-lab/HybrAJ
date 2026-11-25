@@ -9,17 +9,6 @@ class Utils:
     def __init__(self):
         pass
 
-    def find_project_root(self, project_name="hybrid_action_space"):
-        path = os.path.abspath(__file__)
-        while True:
-            if os.path.basename(path) == project_name:
-                return path
-            new_path = os.path.dirname(path)
-            if new_path == path:
-                raise RuntimeError(f"Project root '{project_name}' not found.")
-            path = new_path
-            return path
-
     # randomly sampled arbitrary contacting points on horizontal surface
     def sample_point_on_top_of_arbitrary(self, object_id, margin=0.01, max_tries=10, seed=None):
         """

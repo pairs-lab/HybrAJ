@@ -6,10 +6,10 @@ import os
     End Effector for robot
 """
 
-ROOT_PATH = os.path.abspath('.')
+from utils.paths import ROOT as ROOT_PATH
 
 def root_path(target):
-    return os.path.join(ROOT_PATH, 'asset', target)
+    return os.path.join(ROOT_PATH, 'assets', target)
 
 SUCTION_BASE_URDF = 'suction/suction-base.urdf'
 SUCTION_HEAD_URDF = 'suction/suction-head.urdf'

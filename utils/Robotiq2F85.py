@@ -17,10 +17,10 @@ Index: 9, Name: robotiq_2f_85_left_pad_joint
 Index: 10, Name: robotiq_2f_85_left_spring_link_joint
 '''
 
-ROOT_PATH = os.path.abspath('.')
+from utils.paths import ROOT as ROOT_PATH
 
 def root_path(target):
-    return os.path.join(ROOT_PATH, 'asset', target)
+    return os.path.join(ROOT_PATH, 'assets', target)
 
 # @markdown **Gripper class:** adds a gripper to the robot and runs a parallel thread to simulate single-actuator behavior.
 
