@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Training outputs: <policy_name>_<action>/{ckpt,reward_log,demo}
+*_[0-3]/
+runs/
+*.pth
+*.pt
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
