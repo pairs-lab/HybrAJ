@@ -63,27 +63,8 @@ Outputs go to `<policy_name>_<action>/` in the current directory, for example `t
 | `reward_log/` | TensorBoard logs: `tensorboard --logdir td3_min_random_prob_1/reward_log` |
 | `demo/` | evaluation videos |
 
-> [!NOTE]
-> Starting a run deletes the existing logs (and videos) of the same policy and action.
-
 Options shared by the scripts include `--max_episode`, `--max_steps` (steps per episode), `--eval_freq`,
 `--batch_size`, `--discount` and `--tau`. Run any script with `-h` for the full list.
-
-## Methods
-
-The proposed method is at the root. All other training scripts are in [`baselines/`](baselines/).
-
-| Group | Script | Method |
-|---|---|---|
-| **Proposed** | `train_td3_min_random_prob.py` | Hybrid TD3, weighted clipped target |
-| Target ablations | `train_td3_min_random.py`, `train_td3_min_1a.py`, `train_td3_min_1a_prob.py`, `train_td3_min_2a.py`, `train_td3_min_2a_prob.py`, `train_td3_min_1maxa.py`, `train_td3_maxmin_1a_prob.py`, `train_td3_maxmin_2a_prob.py` | other twin-critic targets from the bias analysis |
-| Hybrid-action methods | `train_hybrid_sac.py`, `train_td3aq.py`, `train_tsmpdqn.py`, `train_pasac.py`, `train_dasac.py` | Hybrid SAC, TD3AQ, TS-MPDQN, PA-SAC, ADSAC |
-| Bias-control methods | `train_darc.py`, `train_datd3.py`, `train_acc_sac.py`, `train_tqc.py` | DARC, DATD3, ACC, TQC |
-| Standard RL | `train_sac.py`, `train_ddpg.py`, `train_ppo.py`, `train_td3.py` | SAC, DDPG, PPO, TD3 |
-
-> [!WARNING]
-> `train_td3.py` is a continuous-only TD3 without the suction output. It does not run with the hybrid environment in
-> this release.
 
 ## Robots
 
