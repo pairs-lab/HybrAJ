@@ -1,8 +1,6 @@
 <div align="center">
 
-# Hybrid TD3
-
-### Overestimation Bias Analysis and Stable Policy Optimization for Hybrid Action Space
+# Hybrid TD3: Overestimation Bias Analysis and Stable Policy Optimization for Hybrid Action Space
 
 Thanh-Tuan Tran, [Thanh Nguyen Canh](https://thanhnguyencanh.github.io/), [Xiem HoangVan](https://sites.google.com/site/xiemhoang/), [Nak Young Chong](https://www.jaist.ac.jp/robot/)
 
